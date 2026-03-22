@@ -8,6 +8,7 @@ members = [
     "wytti-manifest",
     "wytti-cli",
 ]
+exclude = ["examples/demo-app"]
 
 [workspace.package]
 version = "0.1.0"
