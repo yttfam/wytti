@@ -1,6 +1,12 @@
-// Demo app — first guest program talking to the Fytti rendering API.
-// Draws an animated cityscape: sky, sun, buildings, bouncing shapes.
-// All coordinates scale to the viewport size via get_width/get_height.
+// Demo app — first interactive guest program on the Fytti rendering API.
+// Animated cityscape with player-controlled box, sky color cycling,
+// and click markers. Proves the full input → WASM → draw → GPU → screen loop.
+//
+// Controls:
+//   Arrow keys — move the player box
+//   Space      — cycle sky color
+//   Escape     — quit (if host supports it)
+//   Click      — drop a marker
 //
 // Exports:
 //   _start() — called once for setup
@@ -40,28 +46,68 @@ fn text(s: &str, x: f32, y: f32, size: f32, font: u32, color: u32) {
     }
 }
 
-// --- App state ---
+// --- Event unpacking (matches wytti-host pack format) ---
+// Top 8 bits = type, remaining 56 = payload
+
+const EV_KEY_DOWN: u64 = 1;
+const EV_KEY_UP: u64 = 2;
+const EV_MOUSE_CLICK: u64 = 4;
+
+const KEY_UP: u32 = 1;
+const KEY_DOWN: u32 = 2;
+const KEY_LEFT: u32 = 3;
+const KEY_RIGHT: u32 = 4;
+const KEY_SPACE: u32 = 5;
+const KEY_ESCAPE: u32 = 7;
+
+// --- App state (persists in linear memory between frame() calls) ---
 
 static mut FRAME: u32 = 0;
 static mut FONT: u32 = 0;
 
+// Player box position (in design coords 640x480)
+static mut PLAYER_X: f32 = 300.0;
+static mut PLAYER_Y: f32 = 250.0;
+const PLAYER_SPEED: f32 = 4.0;
+
+// Input state (held keys)
+static mut KEY_HELD_UP: bool = false;
+static mut KEY_HELD_DOWN: bool = false;
+static mut KEY_HELD_LEFT: bool = false;
+static mut KEY_HELD_RIGHT: bool = false;
+
+// Sky palette cycling
+static mut SKY_INDEX: u32 = 0;
+const SKY_PALETTE: [u32; 5] = [
+    rgba(50, 60, 120, 255),   // night blue
+    rgba(20, 10, 40, 255),    // deep night
+    rgba(120, 60, 80, 255),   // dusk
+    rgba(40, 100, 140, 255),  // twilight
+    rgba(180, 100, 50, 255),  // sunset
+];
+
+// Click markers (ring buffer)
+static mut MARKERS: [(f32, f32); 16] = [(0.0, 0.0); 16];
+static mut MARKER_COUNT: u32 = 0;
+static mut MARKER_NEXT: u32 = 0;
+
 // Colors
-const SKY: u32 = rgba(50, 60, 120, 255);
 const GROUND: u32 = rgba(40, 120, 50, 255);
 const SUN_COLOR: u32 = rgba(255, 210, 60, 255);
 const SUN_GLOW: u32 = rgba(255, 240, 100, 80);
 const WHITE: u32 = rgba(255, 255, 255, 255);
 const DARK: u32 = rgba(30, 30, 30, 255);
 const WINDOW_LIT: u32 = rgba(255, 220, 80, 255);
-const PINK: u32 = rgba(255, 100, 150, 255);
 const CYAN: u32 = rgba(80, 220, 240, 255);
-const ORANGE: u32 = rgba(255, 140, 40, 255);
 const STRIPE_A: u32 = rgba(255, 60, 80, 255);
 const STRIPE_B: u32 = rgba(60, 80, 255, 255);
+const PLAYER_COLOR: u32 = rgba(255, 80, 200, 255);
+const PLAYER_BORDER: u32 = rgba(255, 255, 255, 255);
+const MARKER_COLOR: u32 = rgba(255, 200, 50, 200);
 
 /// Called once by the host at startup.
 fn main() {
-    let title = "Wytti Demo";
+    let title = "Wytti Demo — arrows to move, space to change sky, click to mark";
     unsafe { set_title(title.as_ptr() as u32, title.len() as u32) };
 
     let font_name = "default";
@@ -74,35 +120,88 @@ pub extern "C" fn frame() {
     let f = unsafe { FRAME };
     let font = unsafe { FONT };
 
-    // Query viewport — scale everything relative to this
     let w = unsafe { get_width() } as f32;
     let h = unsafe { get_height() } as f32;
-
-    // Scale factors relative to a 640x480 design canvas
     let sx = w / 640.0;
     let sy = h / 480.0;
 
-    // Drain events
+    // --- Process input ---
     loop {
-        if unsafe { poll_event() } == 0 {
+        let ev = unsafe { poll_event() };
+        if ev == 0 {
             break;
+        }
+        let ev_type = ev >> 56;
+        let payload = (ev & 0x00FFFFFFFFFFFFFF) as u32;
+
+        match ev_type {
+            EV_KEY_DOWN => match payload {
+                KEY_UP => unsafe { KEY_HELD_UP = true },
+                KEY_DOWN => unsafe { KEY_HELD_DOWN = true },
+                KEY_LEFT => unsafe { KEY_HELD_LEFT = true },
+                KEY_RIGHT => unsafe { KEY_HELD_RIGHT = true },
+                KEY_SPACE => unsafe {
+                    SKY_INDEX = (SKY_INDEX + 1) % SKY_PALETTE.len() as u32;
+                },
+                KEY_ESCAPE => return, // stop requesting frames
+                _ => {}
+            },
+            EV_KEY_UP => match payload {
+                KEY_UP => unsafe { KEY_HELD_UP = false },
+                KEY_DOWN => unsafe { KEY_HELD_DOWN = false },
+                KEY_LEFT => unsafe { KEY_HELD_LEFT = false },
+                KEY_RIGHT => unsafe { KEY_HELD_RIGHT = false },
+                _ => {}
+            },
+            EV_MOUSE_CLICK => {
+                // Mouse click — payload has button/pressed info
+                // For now, just drop a marker at a fixed position
+                // (real mouse coords would need a richer event format)
+                unsafe {
+                    let idx = MARKER_NEXT as usize % 16;
+                    MARKERS[idx] = (PLAYER_X, PLAYER_Y);
+                    MARKER_NEXT += 1;
+                    if MARKER_COUNT < 16 {
+                        MARKER_COUNT += 1;
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    // --- Sky ---
-    unsafe { clear(SKY) };
+    // --- Move player ---
+    unsafe {
+        if KEY_HELD_UP { PLAYER_Y -= PLAYER_SPEED; }
+        if KEY_HELD_DOWN { PLAYER_Y += PLAYER_SPEED; }
+        if KEY_HELD_LEFT { PLAYER_X -= PLAYER_SPEED; }
+        if KEY_HELD_RIGHT { PLAYER_X += PLAYER_SPEED; }
+        // Clamp to design canvas
+        if PLAYER_X < 0.0 { PLAYER_X = 0.0; }
+        if PLAYER_X > 620.0 { PLAYER_X = 620.0; }
+        if PLAYER_Y < 0.0 { PLAYER_Y = 0.0; }
+        if PLAYER_Y > 460.0 { PLAYER_Y = 460.0; }
+    }
 
-    // Stars
+    // --- Draw ---
+
+    let sky = SKY_PALETTE[unsafe { SKY_INDEX } as usize % SKY_PALETTE.len()];
+    unsafe { clear(sky) };
+
+    // Stars (twinkle based on frame)
     let stars: [(f32, f32); 12] = [
         (60.0, 30.0), (180.0, 55.0), (320.0, 20.0), (450.0, 45.0),
         (540.0, 15.0), (100.0, 80.0), (260.0, 70.0), (400.0, 60.0),
         (500.0, 90.0), (150.0, 25.0), (350.0, 85.0), (580.0, 50.0),
     ];
-    for (px, py) in &stars {
-        unsafe { fill_rect(px * sx, py * sy, 2.0 * sx, 2.0 * sy, WHITE) };
+    for (i, (px, py)) in stars.iter().enumerate() {
+        let twinkle = ((f.wrapping_add(i as u32 * 17)) % 60) < 45;
+        if twinkle {
+            unsafe { fill_rect(px * sx, py * sy, 2.0 * sx, 2.0 * sy, WHITE) };
+        }
     }
 
-    // Sun — bobs up and down
+    // Sun
     let bob = ((f as f32) * 0.03).sin() * 10.0 * sy;
     let sun_x = 500.0 * sx;
     let sun_y = 80.0 * sy + bob;
@@ -117,10 +216,10 @@ pub extern "C" fn frame() {
         unsafe { draw_line(sun_x, sun_y, end_x, ground_y, SUN_GLOW, 1.5) };
     }
 
-    // --- Ground ---
+    // Ground
     unsafe { fill_rect(0.0, ground_y, w, h - ground_y, GROUND) };
 
-    // --- Cityscape ---
+    // Cityscape
     let buildings: [(f32, f32, f32, u32); 6] = [
         (40.0, 120.0, 60.0, rgba(80, 80, 100, 255)),
         (110.0, 80.0, 50.0, rgba(70, 70, 90, 255)),
@@ -135,7 +234,6 @@ pub extern "C" fn frame() {
         let bw = bw * sx;
         let bh = ground_y - top;
         unsafe { fill_rect(bx, top, bw, bh, *bc) };
-        // Windows
         let cols = (bw as u32) / (14 * sx as u32).max(1);
         let rows = (bh as u32) / (18 * sy as u32).max(1);
         for row in 0..rows {
@@ -149,8 +247,8 @@ pub extern "C" fn frame() {
         }
     }
 
-    // --- Retro stripes at bottom ---
-    let stripe_y = h * 0.833; // ~400/480
+    // Retro stripes
+    let stripe_y = h * 0.833;
     let stripe_h = (h - stripe_y) / 8.0;
     for i in 0..8 {
         let y = stripe_y + (i as f32) * stripe_h;
@@ -158,19 +256,41 @@ pub extern "C" fn frame() {
         unsafe { fill_rect(0.0, y, w, stripe_h, c) };
     }
 
-    // --- Bouncing shapes ---
-    let bounce_y = 280.0 * sy + ((f as f32) * 0.05).sin() * 20.0 * sy;
-    unsafe { fill_rect(520.0 * sx, bounce_y, 30.0 * sx, 30.0 * sy, PINK) };
-    unsafe { stroke_rect(518.0 * sx, bounce_y - 2.0 * sy, 34.0 * sx, 34.0 * sy, CYAN, 2.0) };
+    // --- Click markers ---
+    let count = unsafe { MARKER_COUNT } as usize;
+    let next = unsafe { MARKER_NEXT } as usize;
+    for i in 0..count {
+        let idx = if next >= count { next - count + i } else { i } % 16;
+        let (mx, my) = unsafe { MARKERS[idx] };
+        if mx > 0.0 || my > 0.0 {
+            // Pulsing marker
+            let pulse = 1.0 + ((f as f32 + i as f32 * 10.0) * 0.1).sin() * 0.3;
+            let size = 6.0 * pulse;
+            unsafe {
+                fill_rect(mx * sx - size * sx, my * sy - size * sy, size * 2.0 * sx, size * 2.0 * sy, MARKER_COLOR);
+                stroke_rect(mx * sx - size * sx - 1.0, my * sy - size * sy - 1.0,
+                    size * 2.0 * sx + 2.0, size * 2.0 * sy + 2.0, WHITE, 1.0);
+            }
+        }
+    }
 
-    let bounce_y2 = 270.0 * sy + ((f as f32) * 0.07 + 1.5).sin() * 25.0 * sy;
-    unsafe { fill_rect(560.0 * sx, bounce_y2, 20.0 * sx, 20.0 * sy, ORANGE) };
-    unsafe { stroke_rect(558.0 * sx, bounce_y2 - 2.0 * sy, 24.0 * sx, 24.0 * sy, WHITE, 1.5) };
+    // --- Player box ---
+    let px = unsafe { PLAYER_X } * sx;
+    let py = unsafe { PLAYER_Y } * sy;
+    let ps = 20.0 * sx.min(sy);
+    // Shadow
+    unsafe { fill_rect(px + 3.0, py + 3.0, ps, ps, rgba(0, 0, 0, 80)) };
+    // Body
+    unsafe { fill_rect(px, py, ps, ps, PLAYER_COLOR) };
+    // Border (pulses)
+    let pulse_w = 2.0 + ((f as f32) * 0.1).sin().abs();
+    unsafe { stroke_rect(px - 1.0, py - 1.0, ps + 2.0, ps + 2.0, PLAYER_BORDER, pulse_w) };
 
-    // --- Text (scale font size to viewport) ---
-    text("Hello from Wytti!", 0.22 * w, 0.42 * h, 36.0 * sy.min(sx), font, WHITE);
-    text("WASI guest -> Fytti host", 0.27 * w, 0.50 * h, 18.0 * sy.min(sx), font, CYAN);
-    text("demo-app running", 10.0, h - 20.0, 12.0 * sy.min(sx), font, WHITE);
+    // --- Text ---
+    let s = sx.min(sy);
+    text("Hello from Wytti!", 0.22 * w, 0.42 * h, 36.0 * s, font, WHITE);
+    text("arrows: move | space: sky | click: mark", 0.12 * w, 0.50 * h, 14.0 * s, font, CYAN);
+    text("demo-app running", 10.0, h - 20.0, 12.0 * s, font, WHITE);
 
     // --- Flush ---
     unsafe { present() };
