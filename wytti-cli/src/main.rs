@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use wytti_manifest::Manifest;
 use wytti_runtime::{Runtime, RuntimeConfig};
 use wytti_sandbox::SandboxPolicy;
+use wytti_server::ServerConfig;
 use wytti_vfs::FsConfig;
 
 #[derive(Parser)]
@@ -58,6 +59,25 @@ enum Commands {
         /// Allow all networking (TCP + UDP + DNS)
         #[arg(long, short = 'N')]
         allow_net: bool,
+    },
+
+    /// Start the HTTP server (exec API + Hermytt registry)
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "9001")]
+        port: u16,
+
+        /// Hermytt registry URL (enables service announcement)
+        #[arg(long)]
+        hermytt_url: Option<String>,
+
+        /// Hermytt auth token
+        #[arg(long)]
+        hermytt_token: Option<String>,
+
+        /// Sandbox policy file for exec requests
+        #[arg(long)]
+        policy: Option<String>,
     },
 }
 
@@ -132,6 +152,29 @@ fn run(cli: Cli) -> Result<()> {
 
             let runtime = Runtime::new()?;
             runtime.run_file(&file, &config)?;
+        }
+
+        Commands::Serve {
+            port,
+            hermytt_url,
+            hermytt_token,
+            policy,
+        } => {
+            let default_policy = if let Some(ref path) = policy {
+                SandboxPolicy::from_file(path)?
+            } else {
+                SandboxPolicy::default()
+            };
+
+            let config = ServerConfig {
+                port,
+                default_policy,
+                hermytt_url,
+                hermytt_token,
+            };
+
+            tokio::runtime::Runtime::new()?
+                .block_on(wytti_server::start_server(config))?;
         }
     }
 

@@ -6,6 +6,7 @@ members = [
     "wytti-sandbox",
     "wytti-host",
     "wytti-manifest",
+    "wytti-server",
     "wytti-cli",
 ]
 exclude = ["examples/demo-app"]
@@ -22,6 +23,10 @@ wytti-vfs = { path = "wytti-vfs" }
 wytti-sandbox = { path = "wytti-sandbox" }
 wytti-host = { path = "wytti-host" }
 wytti-manifest = { path = "wytti-manifest" }
+wytti-server = { path = "wytti-server" }
+
+# HTTP
+axum = "0.8"
 
 # WASI runtime
 wasmtime = { version = "31", features = ["component-model"] }
