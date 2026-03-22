@@ -1,0 +1,15 @@
+[package]
+name = "wytti-host"
+description = "Host function interface for Wytti — the bridge between WASM guests and their host environment"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+wytti-runtime = { workspace = true }
+wytti-sandbox = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

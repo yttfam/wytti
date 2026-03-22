@@ -4,6 +4,7 @@ members = [
     "wytti-runtime",
     "wytti-vfs",
     "wytti-sandbox",
+    "wytti-host",
     "wytti-cli",
 ]
 
@@ -17,6 +18,7 @@ authors = ["Cali"]
 wytti-runtime = { path = "wytti-runtime" }
 wytti-vfs = { path = "wytti-vfs" }
 wytti-sandbox = { path = "wytti-sandbox" }
+wytti-host = { path = "wytti-host" }
 
 # WASI runtime
 wasmtime = { version = "31", features = ["component-model"] }
