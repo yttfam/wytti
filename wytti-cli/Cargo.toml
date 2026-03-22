@@ -14,6 +14,7 @@ path = "src/main.rs"
 wytti-runtime = { workspace = true }
 wytti-vfs = { workspace = true }
 wytti-sandbox = { workspace = true }
+wytti-manifest = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }

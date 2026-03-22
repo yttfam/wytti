@@ -1,0 +1,19 @@
+[app]
+name = "demo-app"
+version = "0.1.0"
+description = "Colorful cityscape demo — first Fytti guest program"
+entry = "demo.wasm"
+
+[capabilities]
+# Drawing surface
+graphics = true
+# No filesystem, network, or env access needed
+filesystem = false
+network = false
+env = false
+
+[window]
+width = 640
+height = 480
+title = "Wytti Demo"
+resizable = false

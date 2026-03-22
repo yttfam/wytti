@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use wytti_manifest::Manifest;
 use wytti_runtime::{Runtime, RuntimeConfig};
 use wytti_sandbox::SandboxPolicy;
 use wytti_vfs::FsConfig;
@@ -84,9 +85,11 @@ fn run(cli: Cli) -> Result<()> {
             allow_dns,
             allow_net,
         } => {
-            // Load sandbox policy
+            // Load sandbox policy: explicit --policy > .fytti.toml manifest > default
             let mut sandbox = if let Some(ref path) = policy {
                 SandboxPolicy::from_file(path)?
+            } else if let Some(manifest) = Manifest::discover(&file)? {
+                manifest.to_sandbox_policy()
             } else {
                 SandboxPolicy::default()
             };

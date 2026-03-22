@@ -1,0 +1,9 @@
+[package]
+name = "demo-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "demo-app"
+path = "src/main.rs"
