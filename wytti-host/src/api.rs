@@ -30,6 +30,14 @@ pub trait HostBackend: Send + 'static {
     /// Flush the current frame to the screen.
     fn present(&mut self);
 
+    // --- Viewport ---
+
+    /// Get viewport width in logical pixels.
+    fn get_width(&self) -> u32;
+
+    /// Get viewport height in logical pixels.
+    fn get_height(&self) -> u32;
+
     // --- Input ---
 
     /// Poll for the next input event. Returns None if no events pending.
@@ -64,6 +72,8 @@ pub struct StubBackend {
     pub frame_requested: bool,
     pub clipboard: String,
     pub draw_calls: Vec<DrawCall>,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Recorded draw call for testing/inspection.
@@ -80,11 +90,17 @@ pub enum DrawCall {
 
 impl StubBackend {
     pub fn new() -> Self {
+        Self::with_size(640, 480)
+    }
+
+    pub fn with_size(width: u32, height: u32) -> Self {
         Self {
             title: String::new(),
             frame_requested: false,
             clipboard: String::new(),
             draw_calls: Vec::new(),
+            width,
+            height,
         }
     }
 }
@@ -133,6 +149,14 @@ impl HostBackend for StubBackend {
 
     fn present(&mut self) {
         self.draw_calls.push(DrawCall::Present);
+    }
+
+    fn get_width(&self) -> u32 {
+        self.width
+    }
+
+    fn get_height(&self) -> u32 {
+        self.height
     }
 
     fn poll_event(&mut self) -> Option<InputEvent> {

@@ -130,6 +130,18 @@ pub fn add_to_linker<B: HostBackend>(linker: &mut Linker<HostState<B>>) -> anyho
         caller.data_mut().backend.present();
     })?;
 
+    // --- Viewport ---
+
+    // fytti_get_width() -> u32
+    linker.func_wrap("fytti", "get_width", |caller: Caller<'_, HostState<B>>| -> u32 {
+        caller.data().backend.get_width()
+    })?;
+
+    // fytti_get_height() -> u32
+    linker.func_wrap("fytti", "get_height", |caller: Caller<'_, HostState<B>>| -> u32 {
+        caller.data().backend.get_height()
+    })?;
+
     // --- Input ---
 
     // fytti_poll_event() -> u64

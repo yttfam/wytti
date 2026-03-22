@@ -1,5 +1,6 @@
 // Demo app — first guest program talking to the Fytti rendering API.
 // Draws an animated cityscape: sky, sun, buildings, bouncing shapes.
+// All coordinates scale to the viewport size via get_width/get_height.
 //
 // Exports:
 //   _start() — called once for setup
@@ -25,28 +26,21 @@ extern "C" {
     fn load_font(name_ptr: u32, name_len: u32) -> u32;
     fn set_title(text_ptr: u32, text_len: u32);
     fn request_frame();
+    fn get_width() -> u32;
+    fn get_height() -> u32;
 }
 
-/// Pack RGBA into u32 (0xRRGGBBAA).
 const fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
     (r as u32) << 24 | (g as u32) << 16 | (b as u32) << 8 | (a as u32)
 }
 
 fn text(s: &str, x: f32, y: f32, size: f32, font: u32, color: u32) {
     unsafe {
-        draw_text(
-            s.as_ptr() as u32,
-            s.len() as u32,
-            x,
-            y,
-            size,
-            font,
-            color,
-        );
+        draw_text(s.as_ptr() as u32, s.len() as u32, x, y, size, font, color);
     }
 }
 
-// --- App state (persists between frames in linear memory) ---
+// --- App state ---
 
 static mut FRAME: u32 = 0;
 static mut FONT: u32 = 0;
@@ -74,59 +68,57 @@ fn main() {
     unsafe { FONT = load_font(font_name.as_ptr() as u32, font_name.len() as u32) };
 }
 
-/// Called per frame by the host after each present/requestFrame cycle.
+/// Called per frame by the host.
 #[unsafe(no_mangle)]
 pub extern "C" fn frame() {
-    let frame = unsafe { FRAME };
+    let f = unsafe { FRAME };
     let font = unsafe { FONT };
 
-    // Poll events (drain queue)
+    // Query viewport — scale everything relative to this
+    let w = unsafe { get_width() } as f32;
+    let h = unsafe { get_height() } as f32;
+
+    // Scale factors relative to a 640x480 design canvas
+    let sx = w / 640.0;
+    let sy = h / 480.0;
+
+    // Drain events
     loop {
-        let ev = unsafe { poll_event() };
-        if ev == 0 {
+        if unsafe { poll_event() } == 0 {
             break;
         }
-        // TODO: handle quit, input, etc.
     }
 
     // --- Sky ---
     unsafe { clear(SKY) };
 
     // Stars
-    let star_positions: [(f32, f32); 12] = [
-        (60.0, 30.0),
-        (180.0, 55.0),
-        (320.0, 20.0),
-        (450.0, 45.0),
-        (540.0, 15.0),
-        (100.0, 80.0),
-        (260.0, 70.0),
-        (400.0, 60.0),
-        (500.0, 90.0),
-        (150.0, 25.0),
-        (350.0, 85.0),
-        (580.0, 50.0),
+    let stars: [(f32, f32); 12] = [
+        (60.0, 30.0), (180.0, 55.0), (320.0, 20.0), (450.0, 45.0),
+        (540.0, 15.0), (100.0, 80.0), (260.0, 70.0), (400.0, 60.0),
+        (500.0, 90.0), (150.0, 25.0), (350.0, 85.0), (580.0, 50.0),
     ];
-    for (sx, sy) in &star_positions {
-        unsafe { fill_rect(*sx, *sy, 2.0, 2.0, WHITE) };
+    for (px, py) in &stars {
+        unsafe { fill_rect(px * sx, py * sy, 2.0 * sx, 2.0 * sy, WHITE) };
     }
 
     // Sun — bobs up and down
-    let bob = ((frame as f32) * 0.03).sin() * 10.0;
-    let sun_x = 500.0;
-    let sun_y = 80.0 + bob;
-    unsafe { fill_rect(sun_x - 30.0, sun_y - 30.0, 60.0, 60.0, SUN_GLOW) };
-    unsafe { fill_rect(sun_x - 18.0, sun_y - 18.0, 36.0, 36.0, SUN_COLOR) };
+    let bob = ((f as f32) * 0.03).sin() * 10.0 * sy;
+    let sun_x = 500.0 * sx;
+    let sun_y = 80.0 * sy + bob;
+    unsafe { fill_rect(sun_x - 30.0 * sx, sun_y - 30.0 * sy, 60.0 * sx, 60.0 * sy, SUN_GLOW) };
+    unsafe { fill_rect(sun_x - 18.0 * sx, sun_y - 18.0 * sy, 36.0 * sx, 36.0 * sy, SUN_COLOR) };
 
     // Glow rays
+    let ground_y = 320.0 * sy;
     for i in 0..6 {
-        let angle_offset = (i as f32) * 18.0;
-        let end_x = sun_x + angle_offset * 3.0 - 150.0;
-        unsafe { draw_line(sun_x, sun_y, end_x, 320.0, SUN_GLOW, 1.5) };
+        let offset = (i as f32) * 18.0 * sx;
+        let end_x = sun_x + offset * 3.0 - 150.0 * sx;
+        unsafe { draw_line(sun_x, sun_y, end_x, ground_y, SUN_GLOW, 1.5) };
     }
 
     // --- Ground ---
-    unsafe { fill_rect(0.0, 320.0, 640.0, 160.0, GROUND) };
+    unsafe { fill_rect(0.0, ground_y, w, h - ground_y, GROUND) };
 
     // --- Cityscape ---
     let buildings: [(f32, f32, f32, u32); 6] = [
@@ -138,53 +130,50 @@ pub extern "C" fn frame() {
         (410.0, 90.0, 50.0, rgba(70, 65, 85, 255)),
     ];
     for (bx, top, bw, bc) in &buildings {
-        let bh = 320.0 - *top;
-        unsafe { fill_rect(*bx, *top, *bw, bh, *bc) };
-        // Windows — lit or dark, flickering
-        let cols = (*bw as u32) / 14;
-        let rows = (bh as u32) / 18;
+        let bx = bx * sx;
+        let top = top * sy;
+        let bw = bw * sx;
+        let bh = ground_y - top;
+        unsafe { fill_rect(bx, top, bw, bh, *bc) };
+        // Windows
+        let cols = (bw as u32) / (14 * sx as u32).max(1);
+        let rows = (bh as u32) / (18 * sy as u32).max(1);
         for row in 0..rows {
             for col in 0..cols {
-                let wx = *bx + 4.0 + (col as f32) * 14.0;
-                let wy = *top + 6.0 + (row as f32) * 18.0;
-                let lit = ((col
-                    .wrapping_mul(7)
-                    .wrapping_add(row.wrapping_mul(13))
-                    .wrapping_add(frame / 30))
-                    % 3)
-                    == 0;
+                let wx = bx + 4.0 * sx + (col as f32) * 14.0 * sx;
+                let wy = top + 6.0 * sy + (row as f32) * 18.0 * sy;
+                let lit = ((col.wrapping_mul(7).wrapping_add(row.wrapping_mul(13)).wrapping_add(f / 30)) % 3) == 0;
                 let wc = if lit { WINDOW_LIT } else { DARK };
-                unsafe { fill_rect(wx, wy, 8.0, 12.0, wc) };
+                unsafe { fill_rect(wx, wy, 8.0 * sx, 12.0 * sy, wc) };
             }
         }
     }
 
-    // --- Retro stripes ---
+    // --- Retro stripes at bottom ---
+    let stripe_y = h * 0.833; // ~400/480
+    let stripe_h = (h - stripe_y) / 8.0;
     for i in 0..8 {
-        let y = 400.0 + (i as f32) * 8.0;
+        let y = stripe_y + (i as f32) * stripe_h;
         let c = if i % 2 == 0 { STRIPE_A } else { STRIPE_B };
-        unsafe { fill_rect(0.0, y, 640.0, 8.0, c) };
+        unsafe { fill_rect(0.0, y, w, stripe_h, c) };
     }
 
     // --- Bouncing shapes ---
-    let bounce_y = 280.0 + ((frame as f32) * 0.05).sin() * 20.0;
-    unsafe { fill_rect(520.0, bounce_y, 30.0, 30.0, PINK) };
-    unsafe { stroke_rect(518.0, bounce_y - 2.0, 34.0, 34.0, CYAN, 2.0) };
+    let bounce_y = 280.0 * sy + ((f as f32) * 0.05).sin() * 20.0 * sy;
+    unsafe { fill_rect(520.0 * sx, bounce_y, 30.0 * sx, 30.0 * sy, PINK) };
+    unsafe { stroke_rect(518.0 * sx, bounce_y - 2.0 * sy, 34.0 * sx, 34.0 * sy, CYAN, 2.0) };
 
-    let bounce_y2 = 270.0 + ((frame as f32) * 0.07 + 1.5).sin() * 25.0;
-    unsafe { fill_rect(560.0, bounce_y2, 20.0, 20.0, ORANGE) };
-    unsafe { stroke_rect(558.0, bounce_y2 - 2.0, 24.0, 24.0, WHITE, 1.5) };
+    let bounce_y2 = 270.0 * sy + ((f as f32) * 0.07 + 1.5).sin() * 25.0 * sy;
+    unsafe { fill_rect(560.0 * sx, bounce_y2, 20.0 * sx, 20.0 * sy, ORANGE) };
+    unsafe { stroke_rect(558.0 * sx, bounce_y2 - 2.0 * sy, 24.0 * sx, 24.0 * sy, WHITE, 1.5) };
 
-    // --- Text ---
-    text("Hello from Wytti!", 140.0, 200.0, 36.0, font, WHITE);
-    text("WASI guest -> Fytti host", 170.0, 240.0, 18.0, font, CYAN);
-    text("demo-app running", 10.0, 460.0, 12.0, font, WHITE);
+    // --- Text (scale font size to viewport) ---
+    text("Hello from Wytti!", 0.22 * w, 0.42 * h, 36.0 * sy.min(sx), font, WHITE);
+    text("WASI guest -> Fytti host", 0.27 * w, 0.50 * h, 18.0 * sy.min(sx), font, CYAN);
+    text("demo-app running", 10.0, h - 20.0, 12.0 * sy.min(sx), font, WHITE);
 
-    // --- Flush frame ---
+    // --- Flush ---
     unsafe { present() };
-
-    // Tell host we want another frame
     unsafe { request_frame() };
-
     unsafe { FRAME = FRAME.wrapping_add(1) };
 }
