@@ -1,0 +1,12 @@
+[package]
+name = "wytti-sandbox"
+description = "Capability-based sandbox policies for Wytti WASI runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = { workspace = true }

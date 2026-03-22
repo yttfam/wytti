@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "wytti-runtime",
+    "wytti-vfs",
+    "wytti-sandbox",
+    "wytti-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Cali"]
+
+[workspace.dependencies]
+wytti-runtime = { path = "wytti-runtime" }
+wytti-vfs = { path = "wytti-vfs" }
+wytti-sandbox = { path = "wytti-sandbox" }
+
+# WASI runtime
+wasmtime = { version = "31", features = ["component-model"] }
+wasmtime-wasi = "31"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
