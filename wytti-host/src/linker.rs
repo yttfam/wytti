@@ -125,6 +125,49 @@ pub fn add_to_linker<B: HostBackend>(linker: &mut Linker<HostState<B>>) -> anyho
         },
     )?;
 
+    // fytti_gradient_rect(x: f32, y: f32, w: f32, h: f32, color1: u32, color2: u32, vertical: u32)
+    linker.func_wrap(
+        "fytti",
+        "gradient_rect",
+        |mut caller: Caller<'_, HostState<B>>,
+         x: f32, y: f32, w: f32, h: f32,
+         color1: u32, color2: u32, vertical: u32| {
+            caller.data_mut().backend.gradient_rect(
+                Rect::new(x, y, w, h),
+                Color::from_u32(color1),
+                Color::from_u32(color2),
+                vertical != 0,
+            );
+        },
+    )?;
+
+    // fytti_fill_ellipse(cx: f32, cy: f32, rx: f32, ry: f32, color: u32)
+    linker.func_wrap(
+        "fytti",
+        "fill_ellipse",
+        |mut caller: Caller<'_, HostState<B>>,
+         cx: f32, cy: f32, rx: f32, ry: f32, color: u32| {
+            caller.data_mut().backend.fill_ellipse(cx, cy, rx, ry, Color::from_u32(color));
+        },
+    )?;
+
+    // fytti_poll_mouse() -> u64
+    // Returns packed (x as f32 bits in upper 32, y as f32 bits in lower 32), or 0 if unavailable.
+    linker.func_wrap(
+        "fytti",
+        "poll_mouse",
+        |mut caller: Caller<'_, HostState<B>>| -> u64 {
+            match caller.data_mut().backend.poll_mouse() {
+                None => 0,
+                Some((x, y)) => {
+                    let xb = x.to_bits() as u64;
+                    let yb = y.to_bits() as u64;
+                    (xb << 32) | yb
+                }
+            }
+        },
+    )?;
+
     // fytti_present()
     linker.func_wrap("fytti", "present", |mut caller: Caller<'_, HostState<B>>| {
         caller.data_mut().backend.present();

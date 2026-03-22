@@ -27,6 +27,16 @@ pub trait HostBackend: Send + 'static {
     /// Draw an image.
     fn draw_image(&mut self, image: ResourceId, x: f32, y: f32, w: f32, h: f32);
 
+    /// Fill a rectangle with a linear gradient.
+    /// If `vertical` is true, gradient goes top→bottom; otherwise left→right.
+    fn gradient_rect(&mut self, rect: Rect, color1: Color, color2: Color, vertical: bool);
+
+    /// Fill an ellipse.
+    fn fill_ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, color: Color);
+
+    /// Poll mouse position. Returns (x, y) in logical pixels, or None if unavailable.
+    fn poll_mouse(&mut self) -> Option<(f32, f32)>;
+
     /// Flush the current frame to the screen.
     fn present(&mut self);
 
@@ -85,6 +95,8 @@ pub enum DrawCall {
     DrawLine(f32, f32, f32, f32, Color, f32),
     DrawText(String, f32, f32, f32, ResourceId, Color),
     DrawImage(ResourceId, f32, f32, f32, f32),
+    GradientRect(Rect, Color, Color, bool),
+    FillEllipse(f32, f32, f32, f32, Color),
     Present,
 }
 
@@ -145,6 +157,20 @@ impl HostBackend for StubBackend {
     fn draw_image(&mut self, image: ResourceId, x: f32, y: f32, w: f32, h: f32) {
         self.draw_calls
             .push(DrawCall::DrawImage(image, x, y, w, h));
+    }
+
+    fn gradient_rect(&mut self, rect: Rect, color1: Color, color2: Color, vertical: bool) {
+        self.draw_calls
+            .push(DrawCall::GradientRect(rect, color1, color2, vertical));
+    }
+
+    fn fill_ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, color: Color) {
+        self.draw_calls
+            .push(DrawCall::FillEllipse(cx, cy, rx, ry, color));
+    }
+
+    fn poll_mouse(&mut self) -> Option<(f32, f32)> {
+        None
     }
 
     fn present(&mut self) {
