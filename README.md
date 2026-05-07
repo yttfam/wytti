@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="wytti" width="180"/></p>
+
 # Wytti
 
 WASI runtime — sandboxed WASM execution for the [YTT family](https://github.com/yttfam).
